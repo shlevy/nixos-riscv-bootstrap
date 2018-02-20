@@ -9,7 +9,7 @@ Running the VM
 
 `run-vm` will build and run the VM described in [default.nix]. It
 requires that you have [Nix] installed and a recent [nixpkgs] checkout
-available in you [$NIX_PATH].
+available in your [$NIX_PATH].
 
 [default.nix]: ./default.nix
 [Nix]: https://nixos.org/nix
