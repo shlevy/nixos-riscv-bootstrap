@@ -1,0 +1,19 @@
+#!/bin/sh
+
+fail () {
+    echo "Please see the README." >&2
+    exit 1
+}
+
+if ! type nix-build &>/dev/null; then
+    echo "Sorry, you must have Nix installed." >&2
+    fail
+fi
+
+has_nixpkgs="$(nix-instantiate --eval -E '(import <nixpkgs/lib>) ? systems.examples.riscv64')"
+if [ "$has_nixpkgs" = "false" ]; then
+    echo "The nixpkgs in your \$NIX_PATH is not new enough." >&2
+    fail
+fi
+
+exec $(nix-build -A run-vm --no-out-link)/bin/run-vm "$@"
