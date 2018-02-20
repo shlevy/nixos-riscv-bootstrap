@@ -36,6 +36,9 @@ let lib = import (nixpkgs + "/lib");
               [ { object = "${self.init}/bin/init";
                   symlink = "/init";
                 }
+                { object = "${self.init}/bin/init";
+                  symlink = "/poweroff";
+                }
               ];
           };
         bbl = crossPkgs.riscv-pk-with-kernel;
