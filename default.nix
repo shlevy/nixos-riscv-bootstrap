@@ -5,39 +5,33 @@ let lib = import (nixpkgs + "/lib");
     crossPkgs = import nixpkgs { inherit crossSystem; };
     pkgs = import nixpkgs {};
     self =
-      { # Temporary init until we get systemd up and running.
-        init = crossPkgs.stdenv.mkDerivation {
-          name = "riscv-init";
+      { busybox = lib.overrideDerivation
+          (crossPkgs.busybox.override { enableStatic = true; })
+          (orig:
+            { nativeBuildInputs = (orig.nativeBuildInputs or []) ++
+                [ crossPkgs.removeReferencesTo ];
 
-          buildInputs = [ crossPkgs.stdenv.cc.libc.static ];
+              postFixup = (orig.postFixup or "") + ''
+                remove-references-to -t ${crossPkgs.stdenv.cc.libc} \
+                 $out/bin/busybox
+              '';
 
-          nativeBuildInputs = [ crossPkgs.removeReferencesTo ];
-
-          unpackPhase = "true";
-
-          buildPhase = ''
-            ${crossPkgs.stdenv.cc.targetPrefix}cc -O3 -static \
-              ${./init.c} -o init
-          '';
-
-          installPhase = ''
-            mkdir -p $out/bin
-            install -m755 init $out/bin
-          '';
-
-          postFixup = ''
-            remove-references-to -t ${crossPkgs.stdenv.cc.libc} $out/bin/init
-          '';
-
-          allowedReferences = [];
-        };
+              allowedReferences = [];
+            });
+        init = pkgs.writeScriptBin "init" ''
+          #!${self.busybox}/bin/sh
+          mount -t proc proc /proc
+          mount -t sysfs sysfs /sys
+          mount -t devtmpfs devtmpfs /dev
+          exec -a init ash
+        '';
         initrd = pkgs.makeInitrd
           { contents =
               [ { object = "${self.init}/bin/init";
                   symlink = "/init";
                 }
-                { object = "${self.init}/bin/init";
-                  symlink = "/poweroff";
+                { object = "${self.busybox}/bin";
+                  symlink = "/bin";
                 }
               ];
           };
