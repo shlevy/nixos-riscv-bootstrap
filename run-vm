@@ -16,4 +16,9 @@ if [ "$has_nixpkgs" = "false" ]; then
     fail
 fi
 
-exec $(nix-build -A run-vm --no-out-link)/bin/run-vm "$@"
+storePath="$(nix-build -A run-vm --no-out-link || echo $?)"
+if [ "$(expr "$storePath" : "^/")" = "0" ]; then
+    exit "$storePath"
+fi
+
+exec "$storePath"/bin/run-vm "$@"

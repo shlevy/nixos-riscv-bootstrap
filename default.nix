@@ -18,11 +18,22 @@ let lib = import (nixpkgs + "/lib");
 
               allowedReferences = [];
             });
+        kernel = crossPkgs.linux_riscv;
+        initrd-modules = pkgs.makeModulesClosure
+          { inherit (self) kernel;
+            firmware = null;
+            rootModules = [ "virtio_scsi" "btrfs" "crc32c" "sd_mod" "virtio_mmio" ];
+          };
         init = pkgs.writeScriptBin "init" ''
           #!${self.busybox}/bin/sh
           mount -t proc proc /proc
           mount -t sysfs sysfs /sys
           mount -t devtmpfs devtmpfs /dev
+          modprobe sd_mod
+          modprobe virtio_mmio
+          modprobe virtio_scsi
+          modprobe crc32c
+          modprobe btrfs
           exec -a init ash
         '';
         initrd = pkgs.makeInitrd
@@ -32,6 +43,9 @@ let lib = import (nixpkgs + "/lib");
                 }
                 { object = "${self.busybox}/bin";
                   symlink = "/bin";
+                }
+                { object = "${self.initrd-modules}/lib/modules";
+                  symlink = "/lib/modules";
                 }
               ];
           };
