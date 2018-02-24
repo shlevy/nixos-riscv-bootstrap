@@ -125,8 +125,8 @@ let lib = import (nixpkgs + "/lib");
     self =
       { make-image = pkgs.writeShellScriptBin "make-image"
           ''
-            declare -r file="''${1-nix-store-image.qcow2}"
-            declare -r size="''${2-${imageSize}}"
+            declare -r file="''${2-nix-store-image.qcow2}"
+            declare -r size="''${1-${imageSize}}"
             exec -a qemu-img ${qemu}/bin/qemu-img create -f qcow2 \
               -b ${base-image}/riscv-base-nix-image.qcow2 "$file" \
               $size
@@ -137,7 +137,7 @@ let lib = import (nixpkgs + "/lib");
             declare -r image="''${NIX_STORE_IMAGE-nix-store-image.qcow2}"
             if [ ! -f "$image" ]; then
               echo "No nix store image, creating one sized ${imageSize}...">&2
-              ${self.make-image}/bin/make-image "$image" ${imageSize}
+              ${self.make-image}/bin/make-image ${imageSize} "$image"
             fi
             declare -r mem="''${QEMU_MEMORY_SIZE-2G}"
             declare -r cmd="console=ttyS0 profile=${base-profile}"
