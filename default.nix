@@ -1,5 +1,5 @@
 { nixpkgs ? <nixpkgs> # TODO peg revision once stable
-, imageSize ? "2G"
+, imageSize ? "200G"
 }:
 let lib = import (nixpkgs + "/lib");
     crossSystem = lib.systems.examples.riscv64;
