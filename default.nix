@@ -43,12 +43,25 @@ let lib = import (nixpkgs + "/lib");
           sed 's/^profile=//')"
         export PATH="$profile/bin":$PATH
 
-        mkdir /nix-cleanup
-        mount --bind /nix /nix-cleanup
+        mkdir -p /nix-cleanup/nix
+        mount --bind /nix /nix-cleanup/nix
         mount /dev/sda1 /nix
-        rm -fR /nix-cleanup/*
-        umount /nix-cleanup
-        rmdir /nix-cleanup
+
+        if [ -f /nix/needs-resize ]; then
+          echo "Resizing /nix to the full disk space..." >&2
+          sgdisk --clear --new 1 --change-name=1:"${base-image.name}" /dev/sda
+          /nix-cleanup/${busybox}/bin/umount /nix
+          partprobe /dev/sda
+          mount /dev/sda1 /nix
+          btrfs filesystem resize max /nix
+          sync
+          rm /nix/needs-resize
+        fi
+
+        rm -fR /nix-cleanup/nix/*
+        umount /nix-cleanup/nix
+        rmdir /nix-cleanup/nix
+        rmdir /nix-cleanup/
 
         unlink /bin
         ln -sf "$profile"/bin /
@@ -76,7 +89,11 @@ let lib = import (nixpkgs + "/lib");
       qemu = pkgs.qemu-riscv;
       base-profile = pkgs.buildEnv
         { name = "nixos-riscv-bootstrap-base-profile";
-          paths = [ crossPkgs.nixUnstable kernel busybox ];
+          paths =
+            map (p: crossPkgs.${p}) [ "nixUnstable"
+                                      "gptfdisk"
+                                      "btrfs-progs"
+                                    ] ++ [ kernel busybox ];
         };
       image-closure = closureInfo { rootPaths = [ base-profile ]; };
       base-image =
@@ -102,6 +119,7 @@ let lib = import (nixpkgs + "/lib");
             nix-store --load-db <${image-closure}/registration
             nix-store -r ${base-profile} --option store /mnt \
               --option substituters "/?trusted=true"
+            touch /mnt/nix/needs-resize
             umount /mnt/nix
           '');
     self =
