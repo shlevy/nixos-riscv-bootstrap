@@ -6,84 +6,46 @@ let lib = import (nixpkgs + "/lib");
     crossPkgs = import nixpkgs { inherit crossSystem; };
     pkgs = import nixpkgs {};
     closureInfo = pkgs.callPackage ./closure-info.nix {};
-    busybox =
-      lib.overrideDerivation
-        (crossPkgs.busybox.override { enableStatic = true; })
-        (orig:
-          { nativeBuildInputs = (orig.nativeBuildInputs or []) ++
-              [ crossPkgs.removeReferencesTo ];
-
-            postFixup = (orig.postFixup or "") + ''
-              remove-references-to -t ${crossPkgs.stdenv.cc.libc} \
-                $out/bin/busybox
-            '';
-
-            allowedReferences = [];
-          });
-      kernel = crossPkgs.linux_riscv;
-      initrd-modules = pkgs.makeModulesClosure
-        { inherit kernel;
-          firmware = null;
-          rootModules = [ "virtio_scsi" "virtio_mmio" "sd_mod"
-                          "btrfs" "crc32c"
-                        ];
-        };
-      init = pkgs.writeScriptBin "init" ''
-        #!${busybox}/bin/sh
-        mount -t proc proc /proc
-        mount -t sysfs sysfs /sys
-        mount -t devtmpfs devtmpfs /dev
-        modprobe sd_mod
-        modprobe virtio_mmio
-        modprobe virtio_scsi
-        modprobe crc32c
-        modprobe btrfs
-
-        profile="$(grep -o 'profile=[^ ]*' /proc/cmdline | \
-          sed 's/^profile=//')"
-        export PATH="$profile/bin":$PATH
-
-        mkdir -p /nix-cleanup/nix
-        mount --bind /nix /nix-cleanup/nix
-        mount /dev/sda1 /nix
-
-        if [ -f /nix/needs-resize ]; then
-          echo "Resizing /nix to the full disk space..." >&2
-          sgdisk --clear --new 1 --change-name=1:"${base-image.name}" /dev/sda
-          /nix-cleanup/${busybox}/bin/umount /nix
-          partprobe /dev/sda
-          mount /dev/sda1 /nix
-          btrfs filesystem resize max /nix
-          sync
-          rm /nix/needs-resize
-        fi
-
-        rm -fR /nix-cleanup/nix/*
-        umount /nix-cleanup/nix
-        rmdir /nix-cleanup/nix
-        rmdir /nix-cleanup/
-
-        unlink /bin
-        ln -sf "$profile"/bin /
-        unlink /lib/modules
-        rmdir /lib
-        ln -sf "$profile"/lib /lib
-        unlink /init
-        exec -a init ash
-      '';
-      initrd = pkgs.makeInitrd
-        { contents =
-            [ { object = "${init}/bin/init";
-                  symlink = "/init";
-              }
-              { object = "${busybox}/bin";
-                symlink = "/bin";
-              }
-              { object = "${initrd-modules}/lib/modules";
-                symlink = "/lib/modules";
-              }
-            ];
-        };
+    kernel = crossPkgs.linux_riscv;
+    initrd-modules = (pkgs.makeModulesClosure
+      { inherit kernel;
+        firmware = null;
+        rootModules = [ "virtio_scsi" "virtio_mmio" "sd_mod"
+                        "crc32c" "btrfs"
+                      ];
+      }).overrideAttrs (orig:
+        { builder = (pkgs.writeShellScriptBin "modules-builder.sh"
+            ''
+              source ${orig.builder}
+              xargs unxz < $out/insmod-list
+              sed -i 's/\.xz$//' $out/insmod-list
+            '') + "/bin/modules-builder.sh";
+        });
+    init = crossPkgs.stdenv.mkDerivation
+      { name = "init";
+        buildInputs = [ crossPkgs.stdenv.cc.libc.static ];
+        nativeBuildInputs = [ crossPkgs.removeReferencesTo ];
+        unpackPhase = "true";
+        buildPhase =
+          "${crossPkgs.stdenv.cc.targetPrefix}cc ${./init.c} -O3 " +
+          "-o init -static";
+        installPhase =
+          "mkdir -p $out/bin && install -m755 init $out/bin";
+        postFixup =
+          "remove-references-to -t ${crossPkgs.stdenv.cc.libc} " +
+          "$out/bin/init";
+      };
+    initrd = pkgs.makeInitrd
+      { contents =
+          [ { object = "${init}/bin/init";
+              symlink = "/init";
+            }
+            { object = "${initrd-modules}/insmod-list";
+              symlink = "/insmod-list";
+            }
+          ];
+        compressor = "xz -9 --check=crc32";
+      };
       bbl = crossPkgs.riscv-pk.override
         { payload = "${kernel}/vmlinux"; };
       qemu = pkgs.qemu-riscv;
@@ -93,7 +55,8 @@ let lib = import (nixpkgs + "/lib");
             map (p: crossPkgs.${p}) [ "nixUnstable"
                                       "gptfdisk"
                                       "btrfs-progs"
-                                    ] ++ [ kernel busybox ];
+                                      "busybox"
+                                    ] ++ [ kernel ];
         };
       image-closure = closureInfo { rootPaths = [ base-profile ]; };
       base-image =
@@ -113,14 +76,26 @@ let lib = import (nixpkgs + "/lib");
           }
           ''
             sgdisk --new 1 --change-name=1:"$name" /dev/vda
-            mkfs.btrfs --label nix /dev/vda1
-            mkdir -p /mnt/nix
-            mount /dev/vda1 /mnt/nix
+            mkfs.btrfs --label root /dev/vda1
+            mkdir /mnt
+            mount /dev/vda1 /mnt
+
             nix-store --load-db <${image-closure}/registration
             nix-store -r ${base-profile} --option store /mnt \
               --option substituters "/?trusted=true"
-            touch /mnt/nix/needs-resize
-            umount /mnt/nix
+
+            mkdir -p -m755 /mnt/nix/var/nix/profiles
+            ln -s ${base-profile} /mnt/nix/var/nix/profiles/system-1-link
+            ln -s system-1-link /mnt/nix/var/nix/profiles/system
+
+            mkdir -p /mnt/dev
+
+            # Sigh
+            mkdir -p /mnt/bin
+            ln -s ${base-profile}/bin/sh /mnt/bin
+
+            touch /mnt/needs-resize
+            umount /mnt
           '');
     self =
       { make-image = pkgs.writeShellScriptBin "make-image"
