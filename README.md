@@ -1,6 +1,8 @@
 nixos-riscv-bootstrap
 ======================
 
+!!! This readme is out of date !!!
+
 Nix expressions to help bootstrap our way to full RISC-V support on
 NixOS.
 
